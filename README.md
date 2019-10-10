@@ -15,7 +15,7 @@ This project allows you to standardise Windows patch level using baseline and en
 
 ### Step 1 - Install Updates on Windows VM as Baseline
 `ansible-playbook -i <your inventory file> install_updates_as_baseline.yml -e '{"inputs": {"whitelist": [], "blacklist": ["Windows Malicious Software Removal Tool"]}}'`
-- whitelist is a list of additional updates to install (must be provided as [] if not appplicable)
+- whitelist is a list of additional updates to install (must be provided as [] if not applicable)
 - blacklist is a list of updates to exclude from installation (must be provided as [] if not applicable)
 
 ### Step 2 - Create Baseline as JSON
