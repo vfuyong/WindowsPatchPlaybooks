@@ -1,0 +1,47 @@
+# --extra-vars format:
+#   {"inputs": {"whitelist": [], "blacklist": ["LanguageFeatureOnDemand","Windows Malicious Software Removal Tool"]}}
+# whitelist: Include updates for installation as baseline
+# blacklist: Exclude updates for installation as baseline
+#
+# Note: For Windows 2016, every month Microsoft releases two cumulative updates (CU): first one in the middle of a month, second one near the end of the month. The second CU supersedes the first, causing the first CU to be hidden when creating baseline. 
+# However, the first CU can be marked as "critical update" but the second can be just "updates". As a result, using the policy to install only critical updates will not be able to install the latest CU as dictated in baseline, causing discrepancies between baseline and target server. 
+# Example: KB4516061(CU classified as Updates) supersedes KB4516044(CU classified as CriticalUpdates) 
+# Workaround: 
+# - While pathing baseline server, use whitelist to install "Cumulative Update for Windows Server 2016"
+# - While patching target server, specify whitelist using explicit KB e.g. "whitelist": ["KB4516061"]
+# * DO NOT use string pattern like "Cumulative Update for Windows Server 2016" because it may install more updates as expected
+- name: Install updates from Internet as baseline
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Install needed updates
+      win_updates:
+        server_selection: windows_update
+        category_names:
+        - SecurityUpdates
+        - CriticalUpdates
+        - ServicePacks
+        - UpdateRollups
+        blacklist: "{{ inputs.blacklist }}"
+        reboot: no
+
+    - name: Install whitelist updates
+      win_updates:
+        server_selection: windows_update
+        category_names:
+        - SecurityUpdates
+        - CriticalUpdates
+        - ServicePacks
+        - UpdateRollups
+        - Application
+        - Connectors
+        - DefinitionUpdates
+        - DeveloperKits
+        - FeaturePacks
+        - Guidance
+        - Tools
+        - Updates
+        whitelist: "{{ inputs.whitelist }}"
+        blacklist: "{{ inputs.blacklist }}"
+        reboot: no
+      when: inputs.whitelist | length > 0

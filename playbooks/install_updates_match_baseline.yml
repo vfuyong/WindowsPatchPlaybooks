@@ -1,0 +1,166 @@
+# --extra-vars format:
+#   {"inputs": {"server_selection": "managed_server", "src_baseline": "/home/young/EDPlaybooks-Windows/playbooks/baseline/win-2016-base-2019-09.json", "working_dir": "C:\\Users\\Public\\Documents", "whitelist": ["KBxxxxxx"], "blacklist": []}}
+# src_baseline: Server path containing the baseline updates that should be installed
+# working_dir: Guest path to save the updates info for inspection if required
+# whitelist: Inlcude updates for installation (must be defined as [] if no updates to include)
+# blacklist: Exclude updates for installation (must be defined as [] if no updates to exclude)
+#
+# Note: 
+#   - Both whitelist and blacklist support an array of powershell-style regex and explicit KB definitions. But it is recommended to only use explicit KB definitions to avoid installing unexpected updates.
+#   - src_baseline has to be relative path to the folder where playbook exists e.g. baseline/win-2016-base-2019-09.json
+- name: _Windows_ Install updates to match a baseline
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: _Windows_ Copy baseline
+      win_copy:
+        src: "{{ inputs.src_baseline }}"
+        dest: "{{ '/'.join([inputs.working_dir, (inputs.src_baseline | basename)]) }}" 
+      changed_when: false
+      check_mode: no
+            
+    - name: _Windows_ Work out needed updates and save updates info to working directory
+      win_shell: |
+        # whitelist string format:
+        # - []
+        # - [u'KB111111', u'KB222222']
+        $whiteListSplits = "{{ inputs.whitelist }}".Trim('[',']').Split(',')
+        $whiteList = @()
+        $null = $whiteListSplits | % {
+                $whiteList += $_.Trim().Trim('u').Trim("'")
+        }
+
+        $workingDir = "{{ inputs.working_dir }}"
+        $srcFileName = Split-Path -Path "{{ inputs.src_baseline }}" -Leaf
+        $ImportPath = Join-Path -Path $workingDir -ChildPath $srcFileName
+        
+        $expectedUpdates = Get-Content -Path $ImportPath | Out-String | ConvertFrom-Json
+        
+        # Get missing updates from baseline
+        $Session = New-Object -ComObject Microsoft.Update.Session
+        $Searcher = $Session.CreateUpdateSearcher()
+        $installedUpdates = $Searcher.Search("IsInstalled=1 and IsHidden=0").Updates
+        if(!$?) {
+                throw 'Unable to search installed updates'
+        }
+
+        $installedIds = @()
+        foreach($update in $installedUpdates) {
+            $installedIds += $update.Identity.UpdateID
+        }
+        
+        $neededFromBaseline = @()
+        foreach($expected in $expectedUpdates) {
+            # Title, KB, ID, Categories, MsrcSeverity, SecurityBulletinIDs, CveIDs, RebootRequired,
+            # SizeMB, Description, ReleaseNotes, MoreInfoUrls
+            # Skip installed
+            if($expected.ID -in $installedIds) {
+                continue
+            }
+
+            $neededFromBaseline += $expected
+        }
+        
+        # Install KB in ascending order 
+        $neededFromBaseline = $neededFromBaseline | Sort { [long]($_.KB -split 'KB')[1] }
+        
+        if($neededFromBaseline) {
+            , $neededFromBaseline | ConvertTo-Json -Compress
+            , ($neededFromBaseline.KB -join ',')
+        } else {
+            , "[]"
+            , ""
+        }
+        
+        # Save needed updates for record purpose
+        $filePrefix = $srcFileName -split '\.' | Select -Index 0
+        $exportNeededFromBaseline = Join-Path -Path $workingDir -ChildPath ($filePrefix + '_needed.txt')
+        $exportWhitelist = Join-Path -Path $workingDir -ChildPath ($filePrefix + '_inputs_whitelist.txt')
+        $exportBlacklist = Join-Path -Path $workingDir -ChildPath ($filePrefix + '_inputs_blacklist.txt')
+        $null = Set-Content -Path $exportNeededFromBaseline -Value $neededFromBaseline.KB -Force
+        $null = Set-Content -Path $exportWhitelist -Value "{{ inputs.whitelist }}" -Force
+        $null = Set-Content -Path $exportBlacklist -Value "{{ inputs.blacklist }}" -Force
+      register: out_info
+      changed_when: false
+      check_mode: no
+    
+    - name: _Windows_ CHECK MODE - Show report
+      debug:
+        msg: "{{ out_info.stdout_lines[0] }}"
+        verbosity: 0
+      when: ansible_check_mode
+      
+    - name: _Windows_ CHECK MODE - Mark changed for needed updates
+      set_fact:
+        dummy: item
+      changed_when: out_info.stdout_lines[1] != ''
+      loop: "{{ out_info.stdout_lines[1].split(',') }}"
+      when: ansible_check_mode and out_info.stdout_lines[1] != ''
+      
+    - name: _Windows_ List needed updates
+      debug:
+        msg: "{{ out_info.stdout_lines[1].split(',') }}"
+        verbosity: 0
+      
+    - name: _Windows_ List whitelist inputs
+      debug:
+        msg: "{{ inputs.whitelist }}"
+        verbosity: 0
+
+    - name: _Windows_ List blacklist inputs
+      debug:
+        msg: "{{ inputs.blacklist }}"
+        verbosity: 0
+
+    # REAL CHANGE AHEAD
+    - name: _Windows_ Install needed updates
+      win_updates:
+        server_selection: "{{ inputs.server_selection | default('managed_server') }}"
+        category_names:
+        - SecurityUpdates
+        - CriticalUpdates
+        - ServicePacks
+        - UpdateRollups
+        - Updates
+        whitelist: "{{ item }}"
+        blacklist: "{{ inputs.blacklist }}"
+        reboot: no
+      loop: "{{ out_info.stdout_lines[1].split(',') }}"
+      when: not ansible_check_mode and out_info.stdout_lines[1] != ''
+      register: out_log_needed
+
+    - name: _Windows_ Show logs after installing needed updates
+      debug:
+        var: out_log_needed
+        verbosity: 0
+      when: not ansible_check_mode and out_info.stdout_lines[1] != ''
+
+    - name: _Windows_ Install whitelist updates
+      win_updates:
+        server_selection: "{{ inputs.server_selection | default('managed_server') }}"
+        category_names:
+        - SecurityUpdates
+        - CriticalUpdates
+        - ServicePacks
+        - UpdateRollups
+        - Application
+        - Connectors
+        - DefinitionUpdates
+        - DeveloperKits
+        - FeaturePacks
+        - Guidance
+        - Tools
+        - Updates
+        whitelist: "{{ item }}"
+        blacklist: "{{ inputs.blacklist }}"
+        reboot: no
+      loop: "{{ inputs.whitelist }}"
+      when: not ansible_check_mode and inputs.whitelist | length > 0
+      register: out_log_whitelist
+
+    - name: _Windows_ Show logs after installing whitelist updates
+      debug:
+        var: out_log_whitelist
+        verbosity: 0
+      when: not ansible_check_mode and inputs.whitelist | length > 0
+

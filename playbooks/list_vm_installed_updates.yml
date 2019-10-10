@@ -1,0 +1,78 @@
+# --extra-vars format:
+#   {"inputs": {"blacklist": ["LanguageFeatureOnDemand","Windows Malicious Software Removal Tool"]}}
+# blacklist: Exclude updates from output (must be [] if no updates to exclude)
+# Note: blacklist supports an array of powershell-style regex and explicit KB definitions
+- name: List installed updates
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: List installed updates
+      win_shell: |
+        # blacklist string format:
+        # - []
+        # - [u'LanguageFeatureOnDemand', u'Windows Malicious Software Removal Tool']
+        $blackListSplits = "{{ inputs.blacklist }}".Trim('[',']').Split(',')
+        $blackList = @()
+
+        $null = $blackListSplits | % {
+                $blackList += $_.Trim().Trim('u').Trim("'")
+        }
+        
+        Function Match-Any($title, $kb, $patterns) {
+                $match = $false
+                foreach($pattern in $patterns) {
+                        if($title -match $pattern) {
+                                $match = $true
+                                break
+                        }
+                        if($kb -eq $pattern) {
+                                $match = $true
+                                break
+                        }
+                }
+                , $match
+        }
+
+        $Session = New-Object -ComObject Microsoft.Update.Session
+        $Searcher = $Session.CreateUpdateSearcher()
+        $updates = $Searcher.Search("IsInstalled=1 and IsHidden=0").Updates
+
+        $csv = @()
+        foreach($update in $updates) {
+            # Skip blacklist match
+            $exclude = Match-Any $update.Title $update.KB $blackList
+            if($exclude) {
+                continue
+            }
+
+            $row = '' | Select Title, KB, ID, Categories, MsrcSeverity, SecurityBulletinIDs, CveIDs, RebootRequired, `
+                SizeMB, Description, ReleaseNotes, MoreInfoUrls
+            $row.Title = $update.Title
+            $row.KB = 'KB' + [string]$update.KBArticleIDs
+            $row.ID = $update.Identity.UpdateID
+            $row.Categories = ($update.Categories | Select -ExpandProperty Name) -join ','
+            $row.MsrcSeverity = $update.MsrcSeverity
+            $row.SecurityBulletinIDs = $update.SecurityBulletinIDs -join ','
+            $row.CveIDs = $update.CveIDs -join ','
+            $row.RebootRequired = $update.RebootRequired
+            $row.SizeMB = [Math]::Round($update.MaxDownloadSize / (1024*1024), 1)
+            $row.Description = $update.Description
+            $row.ReleaseNotes = $update.ReleaseNotes
+            $row.MoreInfoUrls = $update.MoreInfoUrls -join ','
+
+            $csv += $row
+        }
+        $csv = $csv | Sort { [long]($_.KB -split 'KB')[1] } -Descending
+
+        if($csv) {
+            , ($csv | ConvertTo-Json)
+        } else {
+            "[]"
+        }
+      register: out_installed_updates
+      changed_when: false
+
+    - name: List installed updates
+      debug:
+        var: out_installed_updates.stdout
+        verbosity: 0
