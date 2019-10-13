@@ -1,6 +1,10 @@
 ﻿# WindowsPatchPlaybooks
 
-### Ansible Invetory File Example
+This project allows you to standardise Windows patch level using baseline and ensure target Windows machine are patched to the same baseline. 
+
+### Ansible Inventory File Example
+Use inventory file to manage servers to patch.
+
 #### WinRM over HTTP
 `10.10.10.10 ansible_user=Administrator ansible_password=<password> ansible_port=5985 ansible_connection=winrm ansible_winrm_scheme=http ansible_winrm_server_cert_validation=ignore ansible_winrm_message_encryption=never ansible_winrm_read_timeout_sec=9999999 ansible_winrm_operation_timeout_sec=999999 ansible_become=yes ansible_become_method=runas ansible_become_user=System`
 
@@ -13,7 +17,7 @@
 
 ### Step 1 - Install Updates on Windows VM as Baseline
 `ansible-playbook -i <your inventory file> install_updates_as_baseline.yml -e '{"inputs": {"whitelist": [], "blacklist": ["Windows Malicious Software Removal Tool"]}}'`
-- whitelist is a list of additional updates to install (must be provided as [] if not appplicable)
+- whitelist is a list of additional updates to install (must be provided as [] if not applicable)
 - blacklist is a list of updates to exclude from installation (must be provided as [] if not applicable)
 
 ### Step 2 - Create Baseline as JSON
