@@ -27,7 +27,9 @@
         $whiteListSplits = "{{ inputs.whitelist }}".Trim('[',']').Split(',')
         $whiteList = @()
         $null = $whiteListSplits | % {
-                $whiteList += $_.Trim().Trim('u').Trim("'")
+                if($_) {
+                        $whiteList += $_.Trim().Trim('u').Trim("'")
+                }
         }
 
         $workingDir = "{{ inputs.working_dir }}"
@@ -41,7 +43,7 @@
         $Searcher = $Session.CreateUpdateSearcher()
         $installedUpdates = $Searcher.Search("IsInstalled=1 and IsHidden=0").Updates
         if(!$?) {
-                throw 'Unable to search installed updates'
+                throw 'Unable to search installed updates before installation'
         }
 
         $installedIds = @()
@@ -136,7 +138,7 @@
       when: not ansible_check_mode and out_info.stdout_lines[1] != ''
       register: out_log_needed
 
-    - name: _Windows_ Show logs after installing needed updates
+    - name: _Windows_ Logs for needed updates installation
       debug:
         var: out_log_needed
         verbosity: 0
@@ -165,9 +167,97 @@
       when: not ansible_check_mode and inputs.whitelist | length > 0
       register: out_log_whitelist
 
-    - name: _Windows_ Show logs after installing whitelist updates
+    - name: _Windows_ Logs for whitelist updates installation
       debug:
         var: out_log_whitelist
         verbosity: 0
       when: not ansible_check_mode and inputs.whitelist | length > 0
 
+    - name: _Windows_ Post installation validation
+      win_shell: |
+        # whitelist string format:
+        # - []
+        # - [u'KB111111', u'KB222222']
+        $whiteListSplits = "{{ inputs.whitelist }}".Trim('[',']').Split(',')
+        $whiteList = @()
+        $null = $whiteListSplits | % {
+                if($_) {
+                        $whiteList += $_.Trim().Trim('u').Trim("'")
+                }
+        }
+
+        $workingDir = "{{ inputs.working_dir }}"
+        $srcFileName = Split-Path -Path "{{ inputs.src_baseline }}" -Leaf
+        $ImportPath = Join-Path -Path $workingDir -ChildPath $srcFileName
+        
+        $baselineUpdates = Get-Content -Path $ImportPath | Out-String | ConvertFrom-Json
+        
+        # Get installed updates post installation
+        $Session = New-Object -ComObject Microsoft.Update.Session
+        $Searcher = $Session.CreateUpdateSearcher()
+        $installedUpdates = $Searcher.Search("IsInstalled=1 and IsHidden=0").Updates
+        if(!$?) {
+                throw 'Unable to search installed updates after installation'
+        }
+
+        # Get installed update KBs
+        $installedKbs = @()
+        foreach($update in $installedUpdates) {
+            $installedKbs += ('KB' + [string]$update.KBArticleIDs)
+        }
+        
+        # Validate baseline KBs are installed
+        $validatedKbs = @()
+        foreach($baselineUpdate in $baselineUpdates) {
+            # Title, KB, ID, Categories, MsrcSeverity, SecurityBulletinIDs, CveIDs, RebootRequired,
+            # SizeMB, Description, ReleaseNotes, MoreInfoUrls
+            if($baselineUpdate.KB -in $installedKbs) {
+                $validatedKbs += $baselineUpdate.KB
+            }
+        }
+        
+        # Validate whitelist KBs are installed
+        # Note: whiteList must use explicit KB. Otherwise it cannot be detected post installation
+        foreach($whiteListItem in $whiteList) {
+            if(!$whiteListItem.StartsWith('KB')) {
+                Write-Debug -Message ($whiteListItem + ' is not a KB number, it cannot be validated post installation')
+                continue
+            }
+            if($whiteListItem -in $installedKbs) {
+                $validatedKbs += $whiteListItem
+            }
+        }
+        
+        # Save validation for record purpose
+        $filePrefix = $srcFileName -split '\.' | Select -Index 0
+        $exportValidated = Join-Path -Path $workingDir -ChildPath ($filePrefix + '_validated.txt')
+        $null = Set-Content -Path $exportValidated -Value $validatedKbs -Force
+        
+        # Validate count
+        $expectedCountBaseline = $baselineUpdates | Measure-Object | Select -ExpandProperty Count
+        $expectedCountWhitelist = $whiteList | Measure-Object | Select -ExpandProperty Count
+        $expectedCount = $expectedCountBaseline + $expectedCountWhitelist
+        $validatedCount = $validatedKbs | Measure-Object | Select -ExpandProperty Count
+        
+        # Output
+        if($validatedCount -eq $expectedCount) {
+            'validationOK'
+        } else {
+            'validationERROR'
+        }
+        'validatedKbs={0}' -f ($validatedKbs -join ',')
+        'baseline={0} whitelist={1} validated={2}' -f $expectedCountBaseline, $expectedCountWhitelist, $validatedCount
+      register: out_validation
+      changed_when: false
+      when: not ansible_check_mode
+      
+    - name: _Windows_ Logs for post installation validation
+      debug:
+        var: out_validation
+        verbosity: 0
+      when: not ansible_check_mode
+      
+    - name: _Windows_ Fail validation if not all updates are installed
+      fail:
+        msg: Some updates are not installed successfully
+      when: not ansible_check_mode and out_validation.stdout_lines[0] == 'validationERROR'
