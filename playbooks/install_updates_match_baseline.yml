@@ -61,8 +61,15 @@
             $neededFromBaseline += $expected
         }
         
-        # Install KB in ascending order 
+        # Install KB in ascending order by default
         $neededFromBaseline = $neededFromBaseline | Sort { [long]($_.KB -split 'KB')[1] }
+        # Install Service Stack update first
+        # e.g. 2019-10 Servicing Stack Update for Windows Server 2016 for x64-based Systems (KB4521858)
+        $neededFromBaselineP1 = $neededFromBaseline | Where { $_.Title -match 'Servicing Stack' }
+        $neededFromBaselineP2 = $neededFromBaseline | Where { $_.Title -notmatch 'Servicing Stack' }
+        $neededFromBaseline = @()
+        $neededFromBaseline += $neededFromBaselineP1
+        $neededFromBaseline += $neededFromBaselineP2
         
         if($neededFromBaseline) {
             , $neededFromBaseline | ConvertTo-Json -Compress
