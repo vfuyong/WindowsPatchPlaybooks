@@ -74,7 +74,7 @@
         $neededFromBaseline += $neededFromBaselineP2
         
         if($neededFromBaseline) {
-            , $neededFromBaseline | ConvertTo-Json -Compress
+            , ($neededFromBaseline | ConvertTo-Json -Compress)
             , ($neededFromBaseline.KB -join ',')
         } else {
             , "[]"
