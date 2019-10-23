@@ -8,8 +8,6 @@
 # Example: KB4516061(CU classified as Updates) supersedes KB4516044(CU classified as CriticalUpdates) 
 # Workaround: 
 # - While pathing baseline server, use whitelist to install "Cumulative Update for Windows Server 2016"
-# - While patching target server, specify whitelist using explicit KB e.g. "whitelist": ["KB4516061"]
-# * DO NOT use string pattern like "Cumulative Update for Windows Server 2016" because it may install more updates as expected
 - name: Install updates from Internet as baseline
   hosts: all
   gather_facts: no
