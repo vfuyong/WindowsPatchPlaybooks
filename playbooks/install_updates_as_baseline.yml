@@ -1,5 +1,5 @@
 # --extra-vars format:
-#   {"inputs": {"whitelist": [], "blacklist": ["LanguageFeatureOnDemand","Windows Malicious Software Removal Tool"]}}
+#   {"inputs": {"whitelist": ["Cumulative Update for Windows Server 2016"], "blacklist": ["LanguageFeatureOnDemand","Windows Malicious Software Removal Tool"]}}
 # whitelist: Include updates for installation as baseline
 # blacklist: Exclude updates for installation as baseline
 #
